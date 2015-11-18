@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from django.forms.utils import flatatt
 from django.forms.widgets import DateTimeInput
 from django.utils import translation
 from django.utils.safestring import mark_safe
@@ -13,8 +12,11 @@ try:
     from django.utils.encoding import force_unicode as force_text
 except ImportError:  # python3
     from django.utils.encoding import force_text
-
-
+try:
+    from django.forms.util import flatatt
+except ImportError: # Django 1.9
+    from django.forms.utils import flatatt
+    
 class DateTimePicker(DateTimeInput):
     class Media:
         class JsFiles(object):
@@ -24,32 +26,21 @@ class DateTimePicker(DateTimeInput):
                 lang = translation.get_language()
                 if lang:
                     lang = lang.lower()
-                    #There is language name that length>2 *or* contains uppercase.
-                    lang_map = {
-                        'ar-ma': 'ar-ma',
-                        'en-au': 'en-au',
-                        'en-ca': 'en-ca',
-                        'en-gb': 'en-gb',
-                        'en-us': 'en-us',
-                        'fa-ir': 'fa-ir',
-                        'fr-ca': 'fr-ca',
-                        'ms-my': 'ms-my',
-                        'pt-br': 'bt-BR',
-                        'rs-latin': 'rs-latin',
-                        'tzm-la': 'tzm-la',
-                        'tzm': 'tzm',
-                        'zh-cn': 'zh-CN',
-                        'zh-tw': 'zh-TW',
-                        'zh-hk': 'zh-TW',
-                    }
-                    if len(lang) > 2:
-                        lang = lang_map.get(lang, 'en-us')
-                    if lang not in ('en', 'en-us'):
+                    if lang.startswith('zh') and lang not in ('zh-cn', 'zh-tw',):
+                        if lang == 'zh-hk':
+                            lang = 'zh-tw'
+                        else:
+                            lang = 'zh-cn'
+                    elif len(lang) > 2 and lang not in ('ar-ma', 'en-au', 'en-ca', 'en-gb', 
+                                                        'fa-ir', 'fr-ca', 'ms-my', 'pt-br', 
+                                                        'rs-latin', 'tzm-la', ):
+                        lang = lang[:2]
+                    if lang != 'en':
                         yield 'bootstrap3_datetime/js/locales/bootstrap-datetimepicker.%s.js' % (lang)
 
         js = JsFiles()
         css = {'all': ('bootstrap3_datetime/css/bootstrap-datetimepicker.min.css',), }
-
+    
     # http://momentjs.com/docs/#/parsing/string-format/
     # http://docs.python.org/2/library/datetime.html#strftime-strptime-behavior
     format_map = (('DDD', r'%j'),
@@ -78,7 +69,7 @@ class DateTimePicker(DateTimeInput):
         for js, py in cls.format_map:
             format = format.replace(js, py)
         return format
-
+    
     html_template = '''
         <div%(div_attrs)s>
             <input%(input_attrs)s/>
@@ -86,19 +77,12 @@ class DateTimePicker(DateTimeInput):
                 <span%(icon_attrs)s></span>
             </span>
         </div>'''
-
+    
     js_template = '''
         <script>
-            (function(window) {
-                var callback = function() {
-                    $(function(){$("#%(picker_id)s:has(input:not([readonly],[disabled]))").datetimepicker(%(options)s);});
-                };
-                if(window.addEventListener)
-                    window.addEventListener("load", callback, false);
-                else if (window.attachEvent)
-                    window.attachEvent("onload", callback);
-                else window.onload = callback;
-            })(window);
+            $(function() {
+                $("#%(picker_id)s").datetimepicker(%(options)s);
+            });
         </script>'''
 
     def __init__(self, attrs=None, format=None, options=None, div_attrs=None, icon_attrs=None):
@@ -118,6 +102,7 @@ class DateTimePicker(DateTimeInput):
             self.options = False
         else:
             self.options = options and options.copy() or {}
+            self.options['language'] = translation.get_language()
             if format and not self.options.get('format') and not self.attrs.get('date-format'):
                 self.options['format'] = self.conv_datetime_format_py2js(format)
 
@@ -130,8 +115,7 @@ class DateTimePicker(DateTimeInput):
             input_attrs['value'] = force_text(self._format_value(value))
         input_attrs = dict([(key, conditional_escape(val)) for key, val in input_attrs.items()])  # python2.6 compatible
         if not self.picker_id:
-             self.picker_id = (input_attrs.get('id', '') +
-                               '_pickers').replace(' ', '_')
+            self.picker_id = input_attrs.get('id', '') + '_picker'
         self.div_attrs['id'] = self.picker_id
         picker_id = conditional_escape(self.picker_id)
         div_attrs = dict(
@@ -140,10 +124,9 @@ class DateTimePicker(DateTimeInput):
         html = self.html_template % dict(div_attrs=flatatt(div_attrs),
                                          input_attrs=flatatt(input_attrs),
                                          icon_attrs=flatatt(icon_attrs))
-        if self.options:
-            self.options['language'] = translation.get_language()
+        if not self.options:
+            js = ''
+        else:
             js = self.js_template % dict(picker_id=picker_id,
                                          options=json.dumps(self.options or {}))
-        else:
-            js = ''
         return mark_safe(force_text(html + js))
